@@ -43,12 +43,6 @@ in
       description = "User to run svxserver as.";
     };
 
-    settings = lib.mkOption {
-      inherit (settingsFormat) type;
-      description = "Contents of ${pkgs.writeText "svxlink.conf" ""}.";
-      default = { };
-    };
-
     config = lib.mkOption {
       type = lib.types.lines;
       description = "Contents of ${pkgs.writeText "svxlink.conf" ""}.";
@@ -81,14 +75,6 @@ in
 
   config = lib.mkMerge [
     (lib.mkIf cfg.enable {
-      assertions = [
-        {
-          assertion = lib.xor (cfg.settings != { }) (cfg.config != "");
-          message = "services.svxlink.settings and services.svxlink.config are mutually exclusive";
-        }
-      ];
-
-      environment.etc."svxlink/svxlink.conf".source = settingsFile;
 
       systemd.services.svxserver = {
         description = "svxserver svx2svx repeater control software";
