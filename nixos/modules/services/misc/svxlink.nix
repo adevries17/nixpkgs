@@ -78,4 +78,6 @@ in
       };
     };
   };
+
+  meta.maintainers = with lib.maintainers; [ adevries17 ];
 }
