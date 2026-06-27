@@ -4,123 +4,78 @@
   pkgs,
   ...
 }:
+
 let
   cfg = config.services.svxlink;
-  settingsFormat = pkgs.formats.ini { };
 
-  dataDir = "/var/lib/svxlink";
-  settingsFile = "${dataDir}/svxlink.conf";
-
-  mkSettingsFileUnsubstituted =
+  # Helper to convert attribute set to INI format
+  generateIni =
     settings:
     let
-      pyBool = x: if x then "True" else "False";
-      finalSettings = lib.mapAttrs (
-        _: lib.mapAttrs (_: v: if lib.isBool v then pyBool v else v)
-      ) settings;
+      toIniValue = v: if lib.isBool v then (if v then "1" else "0") else toString v;
     in
-    settingsFormat.generate "svxlink-unsubstituted.conf" finalSettings;
-
-  settingsFileUnsubstituted =
-    if cfg.settings == { } then
-      pkgs.writeText "svxlink-unsubstituted.conf" cfg.config
-    else
-      mkSettingsFileUnsubstituted cfg.settings;
+    lib.concatStringsSep "\n\n" (
+      lib.mapAttrs (
+        section: values:
+        let
+          sectionHeader = "[${section}]";
+          sectionBody = lib.concatStringsSep "\n" (
+            lib.mapAttrs (key: value: "${key}=${toIniValue value}") values
+          );
+        in
+        "${sectionHeader}\n${sectionBody}"
+      ) settings
+    );
 in
 {
   options.services.svxlink = {
-    enable = lib.mkEnableOption "svxserver svx2svx repeater control software";
+    enable = lib.mkEnableOption "SvxLink service";
 
     package = lib.mkOption {
       type = lib.types.package;
       default = pkgs.svxlink;
-      description = "The svxlink package.";
+      description = "The SvxLink package to use.";
     };
 
-    runAsUser = lib.mkOption {
+    user = lib.mkOption {
       type = lib.types.user;
       default = "svxlink";
-      description = "User to run svxserver as.";
+      description = "The user under which SvxLink will run.";
     };
 
-    config = lib.mkOption {
-      type = lib.types.lines;
-      description = "Contents of ${pkgs.writeText "svxlink.conf" ""}.";
+    group = lib.mkOption {
+      type = lib.types.userGroup;
+      default = "audio";
+      description = "The group under which SvxLink will run. It should have access to the necessary hardware (e.g., audio, GPIO).";
+    };
+
+    settings = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+      default = { };
+      description = "The configuration settings for SvxLink in INI format. This is a nested attribute set where the first level represents sections and the second level represents key-value pairs.";
+    };
+
+    extraConfig = lib.mkOption {
+      type = lib.types.str;
       default = "";
-    };
-
-    environmentFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = null;
-      description = ''
-        Environment file as defined in {manpage}`systemd.exec(5)`.
-
-        Secrets may be passed to the service without adding them to the world-readable
-        Nix store, by specifying placeholder variables as the option value in Nix and
-        setting these variables accordingly in the environment file.
-
-        ```
-          # snippet of svxlink-related config
-          # If using envsubst in config
-          some_secret = $SVX_SECRET
-        ```
-
-        ```
-          # contents of the environment file
-          SVX_SECRET=verysecretpassword
-        ```
-      '';
+      description = "Additional configuration to append to the generated svxlink.conf.";
     };
   };
 
-  config = lib.mkMerge [
-    (lib.mkIf cfg.enable {
+  config = lib.mkIf cfg.enable {
+    environment.etc."svxlink/svxlink.conf".text =
+      generateIni cfg.settings + (if cfg.extraConfig != "" then "\n\n" + cfg.extraConfig else "");
 
-      systemd.services.svxserver = {
-        description = "svxserver svx2svx repeater control software";
-        after = [
-          "network.target"
-          "remote-fs.target"
-          "syslog.target"
-          "time.target"
-        ];
-        wantedBy = [ "multi-user.target" ];
-        restartTriggers = [
-          settingsFileUnsubstituted
-        ];
-        serviceConfig = {
-          ExecStartPre = [
-            "-${pkgs.coreutils}/bin/touch /var/log/svxserver"
-            "-${pkgs.coreutils}/bin/chown ${cfg.runAsUser} /var/log/svxserver"
-          ];
-          ExecStart = [
-            "/bin/sh"
-            "-c"
-            "${cfg.package}/bin/svxserver --logfile=/var/log/svxserver --config=$CFGFILE --pidfile=/run/svxserver.pid --runasuser=$RUNASUSER"
-          ];
-          ExecReload = "${pkgs.coreutils}/bin/kill -s HUP $MAINPID";
-          Restart = "on-failure";
-          TimeoutStartSec = 60;
-          LimitCORE = "infinity";
-          PIDFile = "/run/svxserver.pid";
-          WorkingDirectory = "/etc/svxlink";
-          Environment = [
-            "CFGFILE=/etc/svxlink/svxlink.conf"
-            "RUNASUSER=${cfg.runAsUser}"
-          ];
-          EnvironmentFile = lib.mkIf (cfg.environmentFile != null) cfg.environmentFile;
-        };
-        preStart = ''
-          mkdir -p "${dataDir}"
-          [ -f ${settingsFile} ] && rm -f ${settingsFile}
-          old_umask=$(umask)
-          umask 0177
-          ${pkgs.envsubst}/bin/envsubst \
-            -o ${settingsFile} \
-            -i ${settingsFileUnsubstituted}
-          umask $old_umask
-        '';
+    systemd.services.svxlink = {
+      description = "SvxLink service";
+      after = [ "network.target" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        User = cfg.user;
+        Group = cfg.group;
+        ExecStart = "${cfg.package}/bin/svxlink --config /etc/svxlink/svxlink.conf";
+        Restart = "on-failure";
       };
-    })
-  ];
+    };
+  };
 }
