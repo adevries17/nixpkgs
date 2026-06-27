@@ -38,13 +38,13 @@ in
     };
 
     user = lib.mkOption {
-      type = lib.types.user;
+      type = lib.types.str;
       default = "svxlink";
       description = "The user under which SvxLink will run.";
     };
 
     group = lib.mkOption {
-      type = lib.types.userGroup;
+      type = lib.types.str;
       default = "audio";
       description = "The group under which SvxLink will run. It should have access to the necessary hardware (e.g., audio, GPIO).";
     };
