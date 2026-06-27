@@ -15,16 +15,18 @@ let
       toIniValue = v: if lib.isBool v then (if v then "1" else "0") else toString v;
     in
     lib.concatStringsSep "\n\n" (
-      lib.mapAttrs (
-        section: values:
-        let
-          sectionHeader = "[${section}]";
-          sectionBody = lib.concatStringsSep "\n" (
-            lib.mapAttrs (key: value: "${key}=${toIniValue value}") values
-          );
-        in
-        "${sectionHeader}\n${sectionBody}"
-      ) settings
+      builtins.attrValues (
+        lib.mapAttrs (
+          section: values:
+          let
+            sectionHeader = "[${section}]";
+            sectionBody = lib.concatStringsSep "\n" (
+              builtins.attrValues (lib.mapAttrs (key: value: "${key}=${toIniValue value}") values)
+            );
+          in
+          "${sectionHeader}\n${sectionBody}"
+        ) settings
+      )
     );
 in
 {
